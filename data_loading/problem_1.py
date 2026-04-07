@@ -60,3 +60,9 @@ def get_IV_train_dataframe() -> pd.DataFrame:
 def get_curve_predict_dataframe() -> pd.DataFrame:
     """ Получение таблицы с прогнозируемыми данным """
     return pd.read_excel(_problem_1_yield_curve_predict_file, parse_dates=['Date'])
+
+
+if __name__ == "__main__":
+    print(get_IV_train_dataframe())
+    print(get_curve_train_dataframe())
+    print(get_curve_predict_dataframe())
