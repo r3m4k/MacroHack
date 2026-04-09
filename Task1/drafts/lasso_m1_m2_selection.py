@@ -15,6 +15,9 @@ from sklearn.preprocessing import StandardScaler
 import warnings
 warnings.filterwarnings("ignore")
 
+from data_loading.problem_1 import get_IV_train_dataframe, get_curve_train_dataframe
+
+
 target_columns = ['O/N', '1W', '2W', '1M', '2M', '3M', '6M', '1Y', '2Y']
 iv_tenors = ['1M', '2M', '3M', '6M', '9M', '1Y', '2Y', '3Y', '4Y',
              '5Y', '6Y', '7Y', '8Y', '9Y', '10Y']

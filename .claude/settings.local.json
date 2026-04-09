@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\pip.exe\" list:*)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/pipeline_ridge_var.py)",
+      "Bash(ls \"c:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\Task1\\\\drafts\\\\results\\\\validation_\"*)"
+    ]
+  }
+}
