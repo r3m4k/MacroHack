@@ -3,7 +3,11 @@
     "allow": [
       "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\pip.exe\" list:*)",
       "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/pipeline_ridge_var.py)",
-      "Bash(ls \"c:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\Task1\\\\drafts\\\\results\\\\validation_\"*)"
+      "Bash(ls \"c:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\Task1\\\\drafts\\\\results\\\\validation_\"*)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\pip.exe\" install:*)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model1_arima_ridge/pipeline.py)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model2_theta_huber/pipeline.py)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model3_delta_forecast/pipeline.py)"
     ]
   }
 }

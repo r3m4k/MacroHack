@@ -313,11 +313,14 @@ def train_var(yield_train):
 # 6. DIRECT FORECAST (ПРЯМОЙ ПРОГНОЗ)
 # ==============================================================================
 
+DAMPING = 0.7  # pred = DAMPING * ridge_pred + (1-DAMPING) * last_known_value
+
+
 def direct_ridge_predict(all_models, scaler, yield_df, iv_df, n_steps, use_iv=False):
     """
-    Direct forecast: каждая модель прогнозирует свой горизонт напрямую.
-    all_models: {h: {tenor: (model, feat_idx)}} — по модели на каждый горизонт.
-    Ошибки не накапливаются.
+    Direct forecast с damping: каждая модель прогнозирует свой горизонт напрямую,
+    затем результат притягивается к последнему известному значению.
+    pred = DAMPING * ridge_pred + (1-DAMPING) * last_known_value
     """
     # Строим фичи из текущих (последних известных) данных — один раз
     yield_feats = make_yield_features(yield_df)
@@ -330,6 +333,9 @@ def direct_ridge_predict(all_models, scaler, yield_df, iv_df, n_steps, use_iv=Fa
     # Берём последнюю строку фичей
     X_last = X_all.iloc[[-1]].ffill(axis=1).fillna(0)
     X_last_scaled = scaler.transform(X_last)
+
+    # Последнее известное значение кривой (якорь для damping)
+    last_known = yield_df[YIELD_TENORS].iloc[-1]
 
     last_date = yield_df.index[-1]
     pred_dates = pd.date_range(
@@ -345,7 +351,9 @@ def direct_ridge_predict(all_models, scaler, yield_df, iv_df, n_steps, use_iv=Fa
         for tenor in YIELD_TENORS:
             model, feat_idx = models_h[tenor]
             X_sub = X_last_scaled[:, feat_idx]
-            pred_row[tenor] = model.predict(X_sub)[0]
+            raw_pred = model.predict(X_sub)[0]
+            # Damping: притягиваем к последнему известному значению
+            pred_row[tenor] = DAMPING * raw_pred + (1 - DAMPING) * last_known[tenor]
         predictions.append(pred_row)
 
     return pd.DataFrame(predictions, index=pred_dates, columns=YIELD_TENORS)
