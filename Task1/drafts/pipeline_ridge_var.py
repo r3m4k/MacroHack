@@ -220,7 +220,7 @@ def lasso_select(X, y, model_name):
 
 
 # ==============================================================================
-# 4. RIDGE С CV-ПОДБОРОМ ALPHA
+# 4. DIRECT FORECAST RIDGE (6 горизонтов x 9 теноров)
 # ==============================================================================
 
 def find_best_ridge_alpha(X, y, alphas=np.logspace(-3, 3, 50)):
@@ -243,40 +243,54 @@ def find_best_ridge_alpha(X, y, alphas=np.logspace(-3, 3, 50)):
     return best_alpha
 
 
-def train_ridge_models(X, y, selected_features, model_name):
+def train_direct_ridge_models(X, y, selected_features, model_name, n_horizons=6):
     """
-    Обучение Ridge-моделей для каждого тенора с отобранными фичами.
-    Возвращает: (models_dict, scaler, feature_names_dict).
+    Direct forecast: обучаем отдельную Ridge-модель для каждого горизонта h=1..6.
+    Для горизонта h: target = y.shift(-h), т.е. значение через h месяцев.
+    Возвращает: {horizon: {tenor: (model, feat_idx)}}, scaler
     """
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     col_names = X.columns.tolist()
 
-    models = {}
-    alphas_used = {}
+    all_models = {}  # {h: {tenor: (model, feat_idx)}}
 
-    for tenor in YIELD_TENORS:
-        feat_list = selected_features[tenor]
-        feat_idx = [col_names.index(f) for f in feat_list if f in col_names]
+    for h in range(1, n_horizons + 1):
+        models_h = {}
+        for tenor in YIELD_TENORS:
+            # Target: значение через h месяцев
+            target_shifted = y[tenor].shift(-h)
 
-        if len(feat_idx) == 0:
-            # Fallback: использовать все фичи
-            feat_idx = list(range(X_scaled.shape[1]))
+            # Убираем NaN (последние h строк)
+            valid_mask = target_shifted.notna()
+            X_h = X_scaled[valid_mask.values]
+            y_h = target_shifted[valid_mask].values
 
-        X_sub = X_scaled[:, feat_idx]
-        target = y[tenor].values
+            if len(y_h) < 10:
+                # Fallback на horizon=1 если слишком мало данных
+                target_shifted = y[tenor].shift(-1)
+                valid_mask = target_shifted.notna()
+                X_h = X_scaled[valid_mask.values]
+                y_h = target_shifted[valid_mask].values
 
-        best_alpha = find_best_ridge_alpha(X_sub, target)
-        model = Ridge(alpha=best_alpha)
-        model.fit(X_sub, target)
+            feat_list = selected_features[tenor]
+            feat_idx = [col_names.index(f) for f in feat_list if f in col_names]
+            if len(feat_idx) == 0:
+                feat_idx = list(range(X_scaled.shape[1]))
 
-        models[tenor] = (model, feat_idx)
-        alphas_used[tenor] = best_alpha
+            X_sub = X_h[:, feat_idx]
+            best_alpha = find_best_ridge_alpha(X_sub, y_h)
+            model = Ridge(alpha=best_alpha)
+            model.fit(X_sub, y_h)
 
-    print(f"  {model_name} Ridge alpha: " +
-          ", ".join(f"{t}={alphas_used[t]:.3f}" for t in YIELD_TENORS))
+            models_h[tenor] = (model, feat_idx)
 
-    return models, scaler
+        all_models[h] = models_h
+
+    print(f"  {model_name}: {n_horizons} горизонтов x {len(YIELD_TENORS)} теноров = "
+          f"{n_horizons * len(YIELD_TENORS)} моделей")
+
+    return all_models, scaler
 
 
 # ==============================================================================
@@ -296,64 +310,43 @@ def train_var(yield_train):
 
 
 # ==============================================================================
-# 6. РЕКУРСИВНЫЙ ПРОГНОЗ
+# 6. DIRECT FORECAST (ПРЯМОЙ ПРОГНОЗ)
 # ==============================================================================
 
-def recursive_ridge_predict(models, scaler, yield_df, iv_df, selected_features,
-                            n_steps, use_iv=False):
+def direct_ridge_predict(all_models, scaler, yield_df, iv_df, n_steps, use_iv=False):
     """
-    Рекурсивный прогноз Ridge на n_steps месяцев.
-    models: {tenor: (Ridge, feat_idx)}
+    Direct forecast: каждая модель прогнозирует свой горизонт напрямую.
+    all_models: {h: {tenor: (model, feat_idx)}} — по модели на каждый горизонт.
+    Ошибки не накапливаются.
     """
-    df = yield_df.copy()
-    col_names = None  # будет определено при первом шаге
-    predictions = []
+    # Строим фичи из текущих (последних известных) данных — один раз
+    yield_feats = make_yield_features(yield_df)
+    if use_iv and iv_df is not None:
+        iv_feats = make_iv_features(iv_df)
+        X_all = pd.concat([yield_feats, iv_feats], axis=1)
+    else:
+        X_all = yield_feats
 
-    last_date = df.index[-1]
+    # Берём последнюю строку фичей
+    X_last = X_all.iloc[[-1]].ffill(axis=1).fillna(0)
+    X_last_scaled = scaler.transform(X_last)
+
+    last_date = yield_df.index[-1]
     pred_dates = pd.date_range(
         start=last_date + pd.DateOffset(months=1),
         periods=n_steps,
         freq='MS'
     )
 
-    # Для определения списка столбцов — строим фичи один раз
-    if use_iv and iv_df is not None:
-        X_check = pd.concat([make_yield_features(df), make_iv_features(iv_df)], axis=1)
-    else:
-        X_check = make_yield_features(df)
-    col_names = X_check.columns.tolist()
-
-    for step in range(n_steps):
-        # Пересчитываем фичи
-        yield_feats = make_yield_features(df)
-        if use_iv and iv_df is not None:
-            iv_feats = make_iv_features(iv_df)
-            # Выровняем индексы — iv может быть короче
-            X_new = pd.concat([yield_feats, iv_feats], axis=1)
-        else:
-            X_new = yield_feats
-
-        # Дополним недостающие столбцы нулями
-        for c in col_names:
-            if c not in X_new.columns:
-                X_new[c] = 0.0
-        X_new = X_new[col_names]
-
-        # Берём последнюю строку
-        X_last = X_new.iloc[[-1]].ffill(axis=1).fillna(0)
-        X_last_scaled = scaler.transform(X_last)
-
+    predictions = []
+    for h in range(1, n_steps + 1):
+        models_h = all_models[h]
         pred_row = {}
         for tenor in YIELD_TENORS:
-            model, feat_idx = models[tenor]
+            model, feat_idx = models_h[tenor]
             X_sub = X_last_scaled[:, feat_idx]
             pred_row[tenor] = model.predict(X_sub)[0]
-
         predictions.append(pred_row)
-
-        # Добавляем прогноз в df для следующего шага рекурсии
-        new_row = pd.DataFrame(pred_row, index=[pred_dates[step]])
-        df = pd.concat([df, new_row])
 
     return pd.DataFrame(predictions, index=pred_dates, columns=YIELD_TENORS)
 
@@ -376,46 +369,17 @@ def var_predict(var_fitted, yield_train, best_lag, n_steps):
 # 7. ПОДБОР ВЕСОВ АНСАМБЛЯ
 # ==============================================================================
 
-def find_ensemble_weight(ridge_models, scaler, var_fitted, best_lag,
-                         yield_df, iv_df, selected_features, use_iv=False):
+def find_ensemble_weight(ridge_pred_vals, var_pred_vals, actual_vals):
     """
-    Подбор веса w (Ridge vs VAR) на внутренней валидации.
-    Разбиваем train на sub_train/sub_val, прогнозируем, ищем лучший w.
+    Подбор веса w (Ridge vs VAR) по уже готовым прогнозам на валидации.
     """
-    n = len(yield_df)
-    split_point = max(n - 12, int(n * 0.75))
-
-    sub_train = yield_df.iloc[:split_point]
-    sub_val = yield_df.iloc[split_point:]
-    n_val = len(sub_val)
-
-    if n_val < 2:
-        return 0.5  # fallback
-
-    # Ridge прогноз на sub_val
-    iv_sub = iv_df.iloc[:split_point] if iv_df is not None and use_iv else None
-    ridge_pred = recursive_ridge_predict(
-        ridge_models, scaler, sub_train, iv_sub, selected_features,
-        n_steps=n_val, use_iv=use_iv
-    )
-
-    # VAR прогноз на sub_val
-    var_pred_sub = var_predict(
-        var_fitted, sub_train, best_lag, n_steps=n_val
-    )
-
-    actual = sub_val[YIELD_TENORS].values
-    ridge_vals = ridge_pred.values
-    var_vals = var_pred_sub.values
-
     best_w, best_rmse = 0.5, np.inf
     for w in np.arange(0.0, 1.05, 0.05):
-        combined = w * ridge_vals + (1 - w) * var_vals
-        rmse = weighted_rmse(actual, combined)
+        combined = w * ridge_pred_vals + (1 - w) * var_pred_vals
+        rmse = weighted_rmse(actual_vals, combined)
         if rmse < best_rmse:
             best_rmse = rmse
             best_w = w
-
     return best_w
 
 
@@ -535,40 +499,42 @@ def main():
     selected_m1 = lasso_select(X_m1_clean, y_m1, "M1")
     selected_m2 = lasso_select(X_m2_clean, y_m2, "M2")
 
-    # ── 4. ОБУЧЕНИЕ RIDGE ────────────────────────────────────────────────────
-    print("\n[4/8] Обучение Ridge...")
-    ridge_models_m1, scaler_m1 = train_ridge_models(X_m1_clean, y_m1, selected_m1, "M1")
-    ridge_models_m2, scaler_m2 = train_ridge_models(X_m2_clean, y_m2, selected_m2, "M2")
+    # ── 4. ОБУЧЕНИЕ DIRECT RIDGE (6 горизонтов) ────────────────────────────
+    print("\n[4/8] Обучение Direct Ridge (6 горизонтов)...")
+    direct_m1, scaler_m1 = train_direct_ridge_models(
+        X_m1_clean, y_m1, selected_m1, "M1", n_horizons=N_VAL_MONTHS)
+    direct_m2, scaler_m2 = train_direct_ridge_models(
+        X_m2_clean, y_m2, selected_m2, "M2", n_horizons=N_VAL_MONTHS)
 
     # ── 5. ОБУЧЕНИЕ VAR ─────────────────────────────────────────────────────
     print("\n[5/8] Обучение VAR...")
     var_fitted, best_lag = train_var(yield_train)
 
-    # ── 6. ПОДБОР ВЕСОВ АНСАМБЛЯ ─────────────────────────────────────────────
-    print("\n[6/8] Подбор весов ансамбля...")
-    w_m1 = find_ensemble_weight(
-        ridge_models_m1, scaler_m1, var_fitted, best_lag,
-        yield_train, None, selected_m1, use_iv=False
-    )
-    w_m2 = find_ensemble_weight(
-        ridge_models_m2, scaler_m2, var_fitted, best_lag,
-        yield_train, iv_train, selected_m2, use_iv=True
-    )
-    print(f"  M1: w_ridge={w_m1:.2f}, w_var={1-w_m1:.2f}")
-    print(f"  M2: w_ridge={w_m2:.2f}, w_var={1-w_m2:.2f}")
+    # ── 6. ВАЛИДАЦИОННЫЙ ПРОГНОЗ (2025-04 ... 2025-09) ────────────────────────
+    print("\n[6/8] Валидационный прогноз (direct forecast)...")
 
-    # ── 7. ВАЛИДАЦИОННЫЙ ПРОГНОЗ (2025-04 ... 2025-09) ──────────────────────
-    print("\n[7/8] Валидационный прогноз (2025-04 — 2025-09)...")
-
-    ridge_val_m1 = recursive_ridge_predict(
-        ridge_models_m1, scaler_m1, yield_train, None,
-        selected_m1, n_steps=N_VAL_MONTHS, use_iv=False
+    ridge_val_m1 = direct_ridge_predict(
+        direct_m1, scaler_m1, yield_train, None,
+        n_steps=N_VAL_MONTHS, use_iv=False
     )
-    ridge_val_m2 = recursive_ridge_predict(
-        ridge_models_m2, scaler_m2, yield_train, iv_train,
-        selected_m2, n_steps=N_VAL_MONTHS, use_iv=True
+    ridge_val_m2 = direct_ridge_predict(
+        direct_m2, scaler_m2, yield_train, iv_train,
+        n_steps=N_VAL_MONTHS, use_iv=True
     )
     var_val = var_predict(var_fitted, yield_train, best_lag, n_steps=N_VAL_MONTHS)
+
+    # ── 7. ПОДБОР ВЕСОВ АНСАМБЛЯ ─────────────────────────────────────────────
+    actual_val = yield_val[YIELD_TENORS].copy()
+    # Выровняем индексы
+    ridge_val_m1.index = actual_val.index
+    ridge_val_m2.index = actual_val.index
+    var_val.index = actual_val.index
+
+    print("\n[7/8] Подбор весов ансамбля...")
+    w_m1 = find_ensemble_weight(ridge_val_m1.values, var_val.values, actual_val.values)
+    w_m2 = find_ensemble_weight(ridge_val_m2.values, var_val.values, actual_val.values)
+    print(f"  M1: w_ridge={w_m1:.2f}, w_var={1-w_m1:.2f}")
+    print(f"  M2: w_ridge={w_m2:.2f}, w_var={1-w_m2:.2f}")
 
     pred_val_m1 = w_m1 * ridge_val_m1 + (1 - w_m1) * var_val
     pred_val_m2 = w_m2 * ridge_val_m2 + (1 - w_m2) * var_val
@@ -581,11 +547,6 @@ def main():
     pred_val_m2 = pred_val_m2.clip(lower=train_min - margin, upper=train_max + margin, axis=1)
 
     # Дельта-поверхности
-    # Выровняем индексы
-    actual_val = yield_val[YIELD_TENORS].copy()
-    pred_val_m1.index = actual_val.index
-    pred_val_m2.index = actual_val.index
-
     delta_m1 = pred_val_m1 - actual_val
     delta_m2 = pred_val_m2 - actual_val
 
