@@ -4,8 +4,11 @@ import numpy as np
 
 
 _problem_1_IV_train_file = Path(__file__).parent.parent / 'MacroHack_data/Problem 1' / 'Problem_1_IV_train.xlsx'
-_problem_1_yield_curve_predict_file = Path(__file__).parent.parent / 'MacroHack_data/Problem 1' / 'Problem_1_yield_curve_predict.xlsx'
 _problem_1_yield_curve_train_file = Path(__file__).parent.parent / 'MacroHack_data/Problem 1' / 'Problem_1_yield_curve_train.xlsx'
+_problem_1_yield_curve_predict_file = Path(__file__).parent.parent / 'MacroHack_data/Problem 1' / 'Problem_1_yield_curve_predict.xlsx'
+
+# Дата начала обучающей выборки (включительно)
+TRAIN_START_DATE = pd.Timestamp('2019-03-01')
 
 
 def _load_curve_train_file() -> pd.DataFrame:
@@ -48,13 +51,15 @@ def get_curve_train_dataframe() -> pd.DataFrame:
 
     df = _load_curve_train_file()
     df.set_index("Month", inplace=True)
-    return  df.apply(fill_long_rates, axis=1)
+    df = df.apply(fill_long_rates, axis=1)
+    return df[df.index >= TRAIN_START_DATE].sort_index()
 
 
 
 def get_IV_train_dataframe() -> pd.DataFrame:
     """ Загрузка данных волатильности процентных ставок из файла Problem_1_IV_train.xlsx """
-    return pd.read_excel(_problem_1_IV_train_file, parse_dates=['Date'])
+    df = pd.read_excel(_problem_1_IV_train_file, parse_dates=['Date'])
+    return df[df['Date'] >= TRAIN_START_DATE]
 
 
 def get_curve_predict_dataframe() -> pd.DataFrame:
@@ -63,6 +68,14 @@ def get_curve_predict_dataframe() -> pd.DataFrame:
 
 
 if __name__ == "__main__":
+    print(f'Структура таблицы {_problem_1_IV_train_file.name}\n')
     print(get_IV_train_dataframe())
+    print('----------------------------------------------\n')
+
+    print(f'Структура таблицы {_problem_1_yield_curve_train_file.name}\n')
     print(get_curve_train_dataframe())
-    print(get_curve_predict_dataframe())
+    print('----------------------------------------------\n')
+
+    # print(f'Структура таблицы {_problem_1_yield_curve_predict_file.name}\n')
+    # print(get_curve_predict_dataframe())
+    # print('----------------------------------------------\n')

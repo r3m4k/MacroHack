@@ -29,6 +29,37 @@ def get_key_rate_dataframe() -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
     df = df[['Date', 'Key Rate', 'Inflation']].iloc[::-1].reset_index(drop=True)
+
+    # --------------------------------------------------------------------------
+    # Спрогнозируем значение ключевой ставки на основе документа
+    # "КОММЕНТАРИЙ К СРЕДНЕСРОЧНОМУ ПРОГНОЗУ БАНКА РОССИИ" от 06.08.25 (рис. 10, стр. 13)
+    # (https://cbr.ru/Content/Document/File/179983/comment_06082025.pdf),
+    # в котором прогнозируется линейное уменьшение ключевой ставки до 2026-03
+    # с целевым параметром в 15.5% в 2026-01 с минимальным шагом в 0.5%
+    # --------------------------------------------------------------------------
+    last_known_rate = df['Key Rate'].iloc[-1]
+    target_rate = 15.5
+
+    forecast_dates = pd.date_range(start='2025-10-01', end='2026-03-01', freq='MS')
+    monthly_change = (target_rate - last_known_rate) / 4
+
+    forecast_rates = []
+    for i, date in enumerate(forecast_dates):
+        months_offset = (date.year - 2025) * 12 + date.month - 9
+        rate = last_known_rate + monthly_change * months_offset
+
+        # Округление до 0.5%
+        rate_rounded = np.round(rate * 2) / 2
+        forecast_rates.append(rate_rounded)
+
+    forecast_df = pd.DataFrame({
+        'Date': forecast_dates,
+        'Key Rate': forecast_rates,
+        'Inflation': [np.nan] * len(forecast_dates)
+    })
+
+    df = pd.concat([df, forecast_df], ignore_index=True)
+
     return df
 
 # ----------------------------------------------------------------------------
@@ -68,9 +99,6 @@ def get_ivbo_dataframe() -> pd.DataFrame:
     return df_long[['Date', 'Value']]
 
 # ----------------------------------------------------------------------------
-
-import pandas as pd
-import numpy as np
 
 def get_gva_monthly_dataframe() -> pd.DataFrame:
     """
@@ -150,8 +178,8 @@ if __name__ == "__main__":
     print('Данные о ключевой ставке и инфляции')
     print(get_key_rate_dataframe())
 
-    print('Данные индекса выпуска товаров и услуг')
-    print(get_ivbo_dataframe())
-
-    print('Квартальные данные валовой добавленной стоимости')
-    print(get_gva_monthly_dataframe())
+    # print('Данные индекса выпуска товаров и услуг')
+    # print(get_ivbo_dataframe())
+    #
+    # print('Квартальные данные валовой добавленной стоимости')
+    # print(get_gva_monthly_dataframe())
