@@ -1,14 +1,14 @@
 """
 ================================================================================
-Model 3 v3: Delta Forecast + Key Rate Category Feature
+Model 3 v2 FINAL: Delta Forecast — Horizon-Adaptive IV
 ================================================================================
 y_hat(t+h) = y(t) + delta_hat(t, h)
 
-Based on v2 (horizon-adaptive IV), with added external feature:
-  - Key rate change category (-5..+5) from CBR key rate history
+Train on ALL data: 2019-03 ... 2025-09
+Forecast: 2025-10 ... 2026-03 (6 months)
 
-M1: yield features + key rate category (~44 features)
-M2: yield + IV (horizon-adaptive) + key rate category (~45-55 features)
+h=1..3: M2 uses full IV features
+h=4..6: M2 uses only iv_spread_10Y_1M
 ================================================================================
 """
 
@@ -34,12 +34,8 @@ from data_loading.problem_1 import get_curve_train_dataframe, get_IV_train_dataf
 # CONSTANTS
 # ==============================================================================
 YIELD_TENORS = ["O/N", "1W", "2W", "1M", "2M", "3M", "6M", "1Y", "2Y"]
-TRAIN_END = "2025-03"
-VAL_START = "2025-04"
-VAL_END = "2025-09"
-N_VAL_MONTHS = 6
-WEIGHT_ON = 0.4
-WEIGHT_OTHER = 0.6 / 8
+TRAIN_END = "2025-09"
+N_FORECAST = 6
 
 IV_KEY_TENORS = ["1M", "3M", "1Y", "5Y", "10Y"]
 IV_SHORT_HORIZON_MAX = 3
@@ -69,21 +65,12 @@ def load_data():
     return yield_df, iv_df
 
 
-def load_key_rate_categories():
-    """Load key rate categories from the text file."""
-    kr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "key_rate_categories.txt")
-    kr_df = pd.read_csv(kr_path, sep='\t', parse_dates=['Date'])
-    kr_df = kr_df.set_index('Date')
-    return kr_df
-
-
 # ==============================================================================
 # DELTA TARGET PREPARATION
 # ==============================================================================
 def prepare_delta_targets(yield_df):
     delta_targets = {}
-    for h in range(1, N_VAL_MONTHS + 1):
+    for h in range(1, N_FORECAST + 1):
         shifted = yield_df[YIELD_TENORS].shift(-h)
         delta = shifted - yield_df[YIELD_TENORS]
         delta_targets[h] = delta.dropna()
@@ -93,8 +80,7 @@ def prepare_delta_targets(yield_df):
 # ==============================================================================
 # FEATURE ENGINEERING
 # ==============================================================================
-def build_m1_features(yield_df, kr_df):
-    """M1 features: yield (~41) + key rate (~3) = ~44."""
+def build_m1_features(yield_df):
     df = yield_df[YIELD_TENORS].copy()
     features = pd.DataFrame(index=df.index)
 
@@ -120,23 +106,10 @@ def build_m1_features(yield_df, kr_df):
     for t in YIELD_TENORS:
         features[f"dev_ma6_{t}"] = df[t] - ma6[t]
 
-    # --- Key rate features ---
-    kr_aligned = kr_df.reindex(features.index).fillna(0)
-
-    # Current category (shifted by 1 to prevent look-ahead)
-    features["kr_cat"] = kr_aligned["key_rate_category"].shift(1)
-
-    # Sum of last 3 months — cumulative monetary policy direction
-    features["kr_sum3"] = kr_aligned["key_rate_category"].rolling(3).sum().shift(1)
-
-    # Abs sum of last 6 months — monetary policy volatility
-    features["kr_vol6"] = kr_aligned["key_rate_category"].abs().rolling(6).sum().shift(1)
-
     return features
 
 
 def build_iv_features_full(iv_df):
-    """Full IV features for h=1..3. ~11 cols."""
     features = pd.DataFrame(index=iv_df.index)
     available_key = [t for t in IV_KEY_TENORS if t in iv_df.columns]
 
@@ -154,7 +127,6 @@ def build_iv_features_full(iv_df):
 
 
 def build_iv_features_minimal(iv_df):
-    """Minimal IV features for h=4..6. 1 col."""
     features = pd.DataFrame(index=iv_df.index)
 
     if "10Y" in iv_df.columns and "1M" in iv_df.columns:
@@ -164,29 +136,26 @@ def build_iv_features_minimal(iv_df):
 
 
 # ==============================================================================
-# METRIC
+# TRAINING & PREDICTION
 # ==============================================================================
-def weighted_rmse(y_true, y_pred):
-    T = y_true.shape[0]
-    weights = np.array([0.4, 0.075, 0.075, 0.075, 0.075, 0.075, 0.075, 0.075, 0.075])
-    sq_errors = (y_true - y_pred) ** 2
-    return np.sqrt(np.sum(weights[np.newaxis, :] * sq_errors) / T)
+def train_and_predict(yield_df, features_df, delta_targets, label):
+    """Train on all data, predict 6 months ahead."""
+    all_dates = yield_df.index
+    last_known = yield_df[YIELD_TENORS].iloc[-1]
+    anchor_date = all_dates[-1]
 
+    # Future dates
+    pred_dates = pd.date_range(
+        start=anchor_date + pd.DateOffset(months=1),
+        periods=N_FORECAST,
+        freq='MS'
+    )
 
-# ==============================================================================
-# TRAINING & PREDICTION — M1 (yield + key rate)
-# ==============================================================================
-def train_and_predict_m1(yield_df, features_df, delta_targets):
-    train_dates = yield_df.index[yield_df.index <= TRAIN_END]
-    last_known = yield_df.loc[yield_df.index <= TRAIN_END, YIELD_TENORS].iloc[-1]
-    val_dates = yield_df.index[(yield_df.index >= VAL_START) & (yield_df.index <= VAL_END)]
-    n_val = len(val_dates)
+    predictions = pd.DataFrame(index=pred_dates, columns=YIELD_TENORS, dtype=float)
 
-    predictions = pd.DataFrame(index=val_dates, columns=YIELD_TENORS, dtype=float)
-
-    for h in range(1, n_val + 1):
+    for h in range(1, N_FORECAST + 1):
         dt = delta_targets[h]
-        valid_idx = dt.index.intersection(train_dates).intersection(features_df.dropna().index)
+        valid_idx = dt.index.intersection(features_df.dropna().index)
 
         X_train = features_df.loc[valid_idx].ffill(axis=1).fillna(0)
         hist_deltas = dt.loc[valid_idx]
@@ -194,11 +163,10 @@ def train_and_predict_m1(yield_df, features_df, delta_targets):
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_train)
 
-        anchor_date = train_dates[-1]
         x_anchor = features_df.loc[[anchor_date]].ffill(axis=1).fillna(0)
         x_anchor_scaled = scaler.transform(x_anchor)
 
-        target_date = val_dates[h - 1]
+        target_date = pred_dates[h - 1]
         print(f"    h={h} -> {target_date.strftime('%Y-%m')}: ", end="")
 
         for j, tenor in enumerate(YIELD_TENORS):
@@ -218,20 +186,13 @@ def train_and_predict_m1(yield_df, features_df, delta_targets):
     return predictions
 
 
-# ==============================================================================
-# TRAINING & PREDICTION — M2 (horizon-adaptive IV + key rate)
-# ==============================================================================
-def train_and_predict_m2(yield_df, iv_df, kr_df, delta_targets):
-    """
-    h=1..3: M1 features (with key rate) + full IV (~55 cols)
-    h=4..6: M1 features (with key rate) + minimal IV (~45 cols)
-    """
-    train_dates = yield_df.index[yield_df.index <= TRAIN_END]
-    last_known = yield_df.loc[yield_df.index <= TRAIN_END, YIELD_TENORS].iloc[-1]
-    val_dates = yield_df.index[(yield_df.index >= VAL_START) & (yield_df.index <= VAL_END)]
-    n_val = len(val_dates)
+def train_and_predict_m2(yield_df, iv_df, delta_targets):
+    """M2: horizon-adaptive IV features."""
+    all_dates = yield_df.index
+    last_known = yield_df[YIELD_TENORS].iloc[-1]
+    anchor_date = all_dates[-1]
 
-    feat_m1 = build_m1_features(yield_df, kr_df)
+    feat_m1 = build_m1_features(yield_df)
     iv_full = build_iv_features_full(iv_df)
     iv_minimal = build_iv_features_minimal(iv_df)
 
@@ -241,9 +202,15 @@ def train_and_predict_m2(yield_df, iv_df, kr_df, delta_targets):
     print(f"    Short-horizon features (h<=3): {feat_full.shape[1]} cols")
     print(f"    Long-horizon features  (h>=4): {feat_min.shape[1]} cols")
 
-    predictions = pd.DataFrame(index=val_dates, columns=YIELD_TENORS, dtype=float)
+    pred_dates = pd.date_range(
+        start=anchor_date + pd.DateOffset(months=1),
+        periods=N_FORECAST,
+        freq='MS'
+    )
 
-    for h in range(1, n_val + 1):
+    predictions = pd.DataFrame(index=pred_dates, columns=YIELD_TENORS, dtype=float)
+
+    for h in range(1, N_FORECAST + 1):
         if h <= IV_SHORT_HORIZON_MAX:
             features_df = feat_full
             iv_label = "full IV"
@@ -252,7 +219,7 @@ def train_and_predict_m2(yield_df, iv_df, kr_df, delta_targets):
             iv_label = "min IV"
 
         dt = delta_targets[h]
-        valid_idx = dt.index.intersection(train_dates).intersection(features_df.dropna().index)
+        valid_idx = dt.index.intersection(features_df.dropna().index)
 
         X_train = features_df.loc[valid_idx].ffill(axis=1).fillna(0)
         hist_deltas = dt.loc[valid_idx]
@@ -260,11 +227,10 @@ def train_and_predict_m2(yield_df, iv_df, kr_df, delta_targets):
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_train)
 
-        anchor_date = train_dates[-1]
         x_anchor = features_df.loc[[anchor_date]].ffill(axis=1).fillna(0)
         x_anchor_scaled = scaler.transform(x_anchor)
 
-        target_date = val_dates[h - 1]
+        target_date = pred_dates[h - 1]
         print(f"    h={h} [{iv_label:>8}] -> {target_date.strftime('%Y-%m')}: ", end="")
 
         for j, tenor in enumerate(YIELD_TENORS):
@@ -291,8 +257,8 @@ def plot_results(yield_df, pred_m1, pred_m2, output_dir):
     fig, axes = plt.subplots(len(YIELD_TENORS), 2, figsize=(18, 4 * len(YIELD_TENORS)))
 
     history = yield_df[YIELD_TENORS]
-    anchor_date = yield_df.loc[yield_df.index <= TRAIN_END].index[-1]
-    last_known = history.loc[anchor_date]
+    anchor_date = history.index[-1]
+    last_known = history.iloc[-1]
 
     for i, tenor in enumerate(YIELD_TENORS):
         for j, (pred, model_name) in enumerate([
@@ -300,9 +266,11 @@ def plot_results(yield_df, pred_m1, pred_m2, output_dir):
         ]):
             ax = axes[i, j]
 
+            # Full history (pink)
             ax.plot(history.index, history[tenor], color='#FF69B4', linewidth=1.5,
-                    label='Actual')
+                    label='History')
 
+            # Forecast (green), connected from last history point
             pred_dates_ext = [anchor_date] + list(pred.index)
             pred_values_ext = [last_known[tenor]] + list(pred[tenor].values.astype(float))
             ax.plot(pred_dates_ext, pred_values_ext,
@@ -315,15 +283,15 @@ def plot_results(yield_df, pred_m1, pred_m2, output_dir):
             ax.tick_params(axis='x', rotation=45, labelsize=8)
 
             if i == 0:
-                subtitle = 'M1 (yield + key rate)' if model_name == 'M1' else \
-                    'M2 (yield + key rate + adaptive IV)'
+                subtitle = 'M1 (yield only)' if model_name == 'M1' else \
+                    'M2 (h<=3: full IV, h>3: iv_spread only)'
                 ax.set_title(subtitle, fontsize=12, fontweight='bold')
 
-    plt.suptitle('Model 3 v3: Delta Forecast + Key Rate Category',
+    plt.suptitle('Final Forecast: 2025-10 to 2026-03  |  Delta Forecast + Adaptive IV',
                  fontsize=16, fontweight='bold', y=1.0)
     plt.tight_layout()
 
-    path = os.path.join(output_dir, "validation_all_tenors.png")
+    path = os.path.join(output_dir, "forecast_all_tenors.png")
     plt.savefig(path, dpi=150, bbox_inches='tight')
     plt.close()
     return path
@@ -334,69 +302,48 @@ def plot_results(yield_df, pred_m1, pred_m2, output_dir):
 # ==============================================================================
 def main():
     print("=" * 70)
-    print("  Model 3 v3: Delta Forecast + Key Rate Category")
+    print("  FINAL FORECAST: Delta + Adaptive IV (train 2019-03..2025-09)")
     print("=" * 70)
 
     print("\n[1] Loading data...")
     yield_df, iv_df = load_data()
-    kr_df = load_key_rate_categories()
     print(f"    Yield: {yield_df.shape}")
     print(f"    IV:    {iv_df.shape}")
-    print(f"    Key rate categories: {kr_df.shape}")
-    print(f"    KR distribution:\n{kr_df['key_rate_category'].value_counts().sort_index().to_string()}")
+    print(f"    Last date: {yield_df.index[-1].strftime('%Y-%m')}")
 
     print("\n[2] Preparing delta targets...")
     delta_targets = prepare_delta_targets(yield_df)
 
-    print("\n[3] Building M1 features (yield + key rate)...")
-    feat_m1 = build_m1_features(yield_df, kr_df)
+    print("\n[3] Building features & training M1...")
+    feat_m1 = build_m1_features(yield_df)
     print(f"    M1: {feat_m1.shape[1]} features")
+    pred_m1 = train_and_predict(yield_df, feat_m1, delta_targets, "M1")
 
-    print("\n[4] Training M1...")
-    pred_m1 = train_and_predict_m1(yield_df, feat_m1, delta_targets)
+    print("\n[4] Training M2 (horizon-adaptive IV)...")
+    pred_m2 = train_and_predict_m2(yield_df, iv_df, delta_targets)
 
-    print("\n[5] Training M2 (yield + key rate + adaptive IV)...")
-    pred_m2 = train_and_predict_m2(yield_df, iv_df, kr_df, delta_targets)
-
-    # --- Metrics ---
-    val_dates = pred_m1.index
-    actual = yield_df.loc[val_dates, YIELD_TENORS]
-    actual_arr = actual.values.astype(float)
-    pred_m1_arr = pred_m1.values.astype(float)
-    pred_m2_arr = pred_m2.values.astype(float)
-
-    rmse_m1 = weighted_rmse(actual_arr, pred_m1_arr)
-    rmse_m2 = weighted_rmse(actual_arr, pred_m2_arr)
+    # --- Print predictions ---
+    print("\n" + "=" * 70)
+    print("  FORECAST M1")
+    print("=" * 70)
+    print(pred_m1.round(4).to_string())
 
     print("\n" + "=" * 70)
-    print("  VALIDATION RESULTS")
+    print("  FORECAST M2")
     print("=" * 70)
-    print(f"\n  Weighted RMSE M1: {rmse_m1:.6f}")
-    print(f"  Weighted RMSE M2: {rmse_m2:.6f}")
-    improvement = (rmse_m1 - rmse_m2) / rmse_m1 * 100
-    print(f"  M2 vs M1: {improvement:+.1f}%")
+    print(pred_m2.round(4).to_string())
 
-    print(f"\n  {'Tenor':>5} | {'RMSE M1':>10} | {'RMSE M2':>10} | {'Better':>6}")
-    print(f"  {'-'*5}-+-{'-'*10}-+-{'-'*10}-+-{'-'*6}")
-    for j, tenor in enumerate(YIELD_TENORS):
-        r1 = np.sqrt(np.mean((actual_arr[:, j] - pred_m1_arr[:, j]) ** 2))
-        r2 = np.sqrt(np.mean((actual_arr[:, j] - pred_m2_arr[:, j]) ** 2))
-        better = "M2" if r2 < r1 else "M1"
-        print(f"  {tenor:>5} | {r1:>10.4f} | {r2:>10.4f} | {better:>6}")
-
-    # --- Save ---
+    # --- Save to Excel ---
     output_dir = os.path.dirname(os.path.abspath(__file__))
 
-    deltas_path = os.path.join(output_dir, "deltas.xlsx")
-    with pd.ExcelWriter(deltas_path, engine="openpyxl") as writer:
-        (pred_m1.astype(float) - actual.astype(float)).to_excel(writer, sheet_name="Delta_M1")
-        (pred_m2.astype(float) - actual.astype(float)).to_excel(writer, sheet_name="Delta_M2")
-        pred_m1.to_excel(writer, sheet_name="Pred_M1")
-        pred_m2.to_excel(writer, sheet_name="Pred_M2")
-        actual.to_excel(writer, sheet_name="Actual")
-    print(f"\n  Saved: {deltas_path}")
+    xlsx_path = os.path.join(output_dir, "Problem_1_yield_curve_predict.xlsx")
+    with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
+        pred_m1.to_excel(writer, sheet_name="M1", index_label="date")
+        pred_m2.to_excel(writer, sheet_name="M2", index_label="date")
+    print(f"\n  Predictions saved: {xlsx_path}")
 
-    print("\n[6] Plotting...")
+    # --- Plot ---
+    print("\n[5] Plotting...")
     path = plot_results(yield_df, pred_m1, pred_m2, output_dir)
     print(f"  Plot: {path}")
 
