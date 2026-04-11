@@ -14,7 +14,15 @@
       "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model4_ensemble_v1v2/pipeline.py)",
       "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model6_tuned_elasticnet/pipeline.py)",
       "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model7_cross_tenor/pipeline.py)",
-      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model8_percentile_rank/pipeline.py)"
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model8_percentile_rank/pipeline.py)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model3_delta_forecast/version1/pipeline_final.py)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model3_delta_forecast/version2/pipeline_final.py)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model3_delta_forecast/version3/pipeline.py)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model3_delta_forecast/version3/pipeline_final.py)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model3_delta_forecast/version2+3/pipeline.py)",
+      "Bash(\"C:\\\\Users\\\\galee\\\\PycharmProjects\\\\MacroHack\\\\.venv\\\\Scripts\\\\python.exe\" Task1/drafts/Method_of_solution/model3_delta_forecast/version2+3/pipeline_final.py)",
+      "Bash(python -c ':*)",
+      "Bash(python \"Task1/drafts/Solution/pipeline_final.py\")"
     ]
   }
 }
