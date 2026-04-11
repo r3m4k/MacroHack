@@ -24,12 +24,14 @@ from mpu_rwd       import build_mpu_rwd
 from mpu_iv_surface import build_mpu_iv_surface
 from mpu_rv        import build_mpu_rv
 from mpu_evaluator import MPUEvaluator
+from mpu_tests     import run_all_tests
 
 RESULT_DIR  = Path('results')
 MATURITIES  = ['1M', '3M', '6M', '1Y']
 MAIN_MAT    = '3M'       # основной срок для MPU_ext и RWD
 SPLIT_FRAC  = 0.6        # доля in-sample для OOS теста
-HORIZONS    = [1, 2, 3, 6]
+HORIZONS    = [1, 2, 3, 6, 12]   # добавлен h=12M
+TEST_INDICES = ['MPU_decay', 'MPU_ext', 'MPU_atm', 'MPU_rv_std']
 
 
 # ============================================================
@@ -67,7 +69,7 @@ def load_data():
 # ============================================================
 
 def build_all_indices(iv_df: pd.DataFrame,
-                       key_rate_df: pd.DataFrame) -> dict[str, pd.Series]:
+                      key_rate_df: pd.DataFrame) -> dict[str, pd.Series]:
     """
     Строит все MPU-индексы и возвращает словарь {название: pd.Series}.
 
@@ -142,7 +144,7 @@ def build_all_indices(iv_df: pd.DataFrame,
 # ============================================================
 
 def evaluate_all(indices: dict[str, pd.Series],
-                  key_rate_df: pd.DataFrame) -> pd.DataFrame:
+                 key_rate_df: pd.DataFrame) -> pd.DataFrame:
     """
     Прогоняет все индексы через MPUEvaluator и возвращает
     сводную таблицу R2_oos.
@@ -220,5 +222,17 @@ if __name__ == '__main__':
 
     # 4. Итоговая сводка
     print_final_summary(summary)
+
+    # 5. Дополнительные тесты для четырёх индексов
+    test_subset = {k: v for k, v in indices.items()
+                   if k in TEST_INDICES}
+
+    run_all_tests(
+        indices_subset = test_subset,
+        iv_df          = iv_df,
+        key_rate_df    = key_rate_df,
+        horizons_all   = [1, 2, 3, 6, 12],
+        save           = True,
+    )
 
     print(f"\nВсе результаты сохранены в: {RESULT_DIR.resolve()}")
