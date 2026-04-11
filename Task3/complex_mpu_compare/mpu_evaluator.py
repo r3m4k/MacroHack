@@ -602,21 +602,21 @@ class MPUEvaluator:
 
     def _merge(self, mpu: pd.Series) -> pd.DataFrame:
         """Объединяет MPU и RV по ближайшей дате (+-15 дней)."""
-        # MPU: reset_index даёт две колонки [дата, значение]
-        mpu_reset = mpu.reset_index()
-        mpu_reset.columns = ['Date', 'MPU']
-        mpu_reset['Date'] = pd.to_datetime(mpu_reset['Date'])
-        mpu_reset = mpu_reset.dropna(subset=['Date'])
+        # MPU DataFrame: строим напрямую из index и values
+        mpu_df = pd.DataFrame({
+            'Date': pd.to_datetime(mpu.index),
+            'MPU':  mpu.values,
+        }).dropna(subset=['Date', 'MPU'])
 
-        # RV: аналогично
-        rv_reset = self.rv.reset_index()
-        rv_reset.columns = ['Date', 'RV']
-        rv_reset['Date'] = pd.to_datetime(rv_reset['Date'])
-        rv_reset = rv_reset.dropna(subset=['Date', 'RV'])
+        # RV DataFrame: строим напрямую из index и values
+        rv_df = pd.DataFrame({
+            'Date': pd.to_datetime(self.rv.index),
+            'RV':   self.rv.values,
+        }).dropna(subset=['Date', 'RV'])
 
         merged = pd.merge_asof(
-            mpu_reset.sort_values('Date'),
-            rv_reset.sort_values('Date'),
+            mpu_df.sort_values('Date'),
+            rv_df.sort_values('Date'),
             on='Date',
             tolerance=pd.Timedelta('15D'),
             direction='nearest'
