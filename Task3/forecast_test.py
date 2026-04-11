@@ -614,6 +614,331 @@ def plot_cross_correlogram(merged: pd.DataFrame,
 
 
 # ============================================================
+# ПРОВЕРКА 1: Робастность без выброса февраля 2022
+# ============================================================
+
+def robustness_no_outlier(merged: pd.DataFrame,
+                          horizons: list[int] | None = None,
+                          rv_threshold: float = 5.0) -> pd.DataFrame:
+    """
+    Повторяет прогнозные регрессии на выборке без экстремального выброса.
+
+    Февраль 2022 (экстренное повышение ставки до 20%) — структурный разрыв.
+    RV в этот период достигала 7.65 п.п. при среднем 0.85 п.п.
+    Один такой выброс может полностью определять знак и значимость beta.
+
+    Метод: удаляем наблюдения где RV > rv_threshold п.п.
+
+    Интерпретация:
+        Если beta становится значимой после удаления выброса ->
+        связь MPU-RV реальна, но маскируется экстремальным эпизодом.
+        Если по-прежнему незначима -> выброс здесь ни при чём,
+        проблема в другом (малая выборка, неверная мера RV и т.д.)
+    """
+    if horizons is None:
+        horizons = [1, 2, 3, 6]
+
+    merged_clean = merged[merged['RV'] < rv_threshold].copy()
+    n_removed    = len(merged) - len(merged_clean)
+
+    print(f"\n{'='*70}")
+    print(f"ПРОВЕРКА 1: Робастность без выброса (RV < {rv_threshold} п.п.)")
+    print(f"Удалено наблюдений: {n_removed} | Осталось: {len(merged_clean)}")
+    print("=" * 70)
+
+    records = []
+    for h in horizons:
+        rv_fwd = merged_clean['RV'].shift(-h)
+        mask   = rv_fwd.notna() & merged_clean['MPU_pca'].notna()
+        y      = rv_fwd[mask].values
+        x      = merged_clean.loc[mask, 'MPU_pca'].values
+
+        if len(y) < 8:
+            continue
+
+        X       = sm.add_constant(x)
+        res     = sm.OLS(y, X).fit(cov_type='HAC', cov_kwds={'maxlags': h})
+        beta    = res.params[1]
+        tstat   = res.tvalues[1]
+        pval    = res.pvalues[1]
+        r2      = res.rsquared
+
+        records.append({
+            'Горизонт h':  h,
+            'N (без выбр.)': int(mask.sum()),
+            'beta':        round(beta, 4),
+            't-stat':      round(tstat, 3),
+            'p-value':     round(pval, 4),
+            'R2':          round(r2, 4),
+            'Значим':      'ДА' if pval < 0.05 else 'нет',
+        })
+
+        print(f"  h={h}: beta={beta:.4f}, t={tstat:.3f}, "
+              f"p={pval:.4f}, R2={r2:.4f}  "
+              f"{'-> ЗНАЧИМ' if pval < 0.05 else ''}")
+
+    return pd.DataFrame(records)
+
+
+# ============================================================
+# ПРОВЕРКА 2: Альтернативная мера RV — среднее |Δr|
+# ============================================================
+
+def robustness_alt_rv(key_rate_df: pd.DataFrame,
+                      mpu_df: pd.DataFrame,
+                      horizons: list[int] | None = None,
+                      window: int = 3) -> pd.DataFrame:
+    """
+    Тест с альтернативной мерой реализованной волатильности.
+
+    Базовая RV = std(Δr) — чувствительна к знаку изменений и выбросам.
+
+    Альтернатива: RV_abs = mean(|Δr|) — среднее абсолютное изменение.
+    Преимущества:
+        - Менее чувствительна к единичным экстремальным значениям
+        - Ближе к понятию "активность ЦБ" (сколько ставка двигается)
+        - Стандартна в literature (mean absolute deviation)
+
+    Если MPU значим для RV_abs но не для RV_std ->
+    MPU лучше предсказывает "активность ЦБ", чем дисперсию изменений.
+    """
+    if horizons is None:
+        horizons = [1, 2, 3, 6]
+
+    df = key_rate_df[['Date', 'Key Rate']].sort_values('Date').copy()
+    df = df.rename(columns={'Key Rate': 'Key_Rate'})
+    df['Delta']  = df['Key_Rate'].diff()
+    df['RV_abs'] = df['Delta'].abs().rolling(window=window,
+                                             min_periods=window).mean()
+
+    rv_df  = df[['Date', 'Key_Rate', 'Delta', 'RV_abs']].dropna()
+    merged = merge_mpu_rv(mpu_df, rv_df, rv_col='RV_abs')
+
+    print(f"\n{'='*70}")
+    print(f"ПРОВЕРКА 2: Альтернативная RV = mean(|delta_r|), окно {window}M")
+    print(f"N = {len(merged)}")
+    print("=" * 70)
+    print(f"  Описательная статистика RV_abs:")
+    print(f"  mean={merged['RV'].mean():.3f}  "
+          f"std={merged['RV'].std():.3f}  "
+          f"max={merged['RV'].max():.3f}")
+
+    records = []
+    for h in horizons:
+        rv_fwd = merged['RV'].shift(-h)
+        mask   = rv_fwd.notna() & merged['MPU_pca'].notna()
+        y      = rv_fwd[mask].values
+        x      = merged.loc[mask, 'MPU_pca'].values
+
+        if len(y) < 8:
+            continue
+
+        X    = sm.add_constant(x)
+        res  = sm.OLS(y, X).fit(cov_type='HAC', cov_kwds={'maxlags': h})
+        beta = res.params[1]
+        tstat = res.tvalues[1]
+        pval = res.pvalues[1]
+        r2   = res.rsquared
+
+        records.append({
+            'Горизонт h':   h,
+            'N':            int(mask.sum()),
+            'beta (RV_abs)': round(beta, 4),
+            't-stat':       round(tstat, 3),
+            'p-value':      round(pval, 4),
+            'R2':           round(r2, 4),
+            'Значим':       'ДА' if pval < 0.05 else 'нет',
+        })
+
+        print(f"  h={h}: beta={beta:.4f}, t={tstat:.3f}, "
+              f"p={pval:.4f}, R2={r2:.4f}  "
+              f"{'-> ЗНАЧИМ' if pval < 0.05 else ''}")
+
+    return pd.DataFrame(records), merged
+
+
+# ============================================================
+# ПРОВЕРКА 3: Контроль на уровень ставки
+# ============================================================
+
+def robustness_rate_control(merged: pd.DataFrame,
+                            horizons: list[int] | None = None) -> pd.DataFrame:
+    """
+    Регрессия с контролем на уровень ключевой ставки.
+
+    Проблема без контроля:
+        В периоды высоких ставок (2022–2024) одновременно:
+        а) MPU_pca высокий (рынок не понимает ЦБ)
+        б) RV высокая (ставка активно меняется)
+        Это создаёт ложную корреляцию — не MPU предсказывает RV,
+        а оба показателя просто одновременно высоки в 2022–2024.
+
+    Модель с контролем:
+        RV(t+h) = alpha + beta*MPU(t) + gamma*RV(t) + delta*Key_Rate(t) + eps
+
+    Интерпретация:
+        Если beta значима при наличии контролей ->
+        MPU несёт уникальную информацию о будущей волатильности
+        сверх текущего уровня ставки и прошлой RV.
+        Это сильный аргумент в пользу индекса.
+
+        Если beta незначима -> связь MPU-RV объясняется
+        общим трендом ставки, а не информацией об неопределённости.
+    """
+    if horizons is None:
+        horizons = [1, 2, 3, 6]
+
+    print(f"\n{'='*70}")
+    print("ПРОВЕРКА 3: Контроль на уровень ключевой ставки")
+    print("Модель: RV(t+h) = a + b*MPU(t) + c*RV(t) + d*Key_Rate(t)")
+    print("=" * 70)
+
+    records = []
+    for h in horizons:
+        rv_fwd  = merged['RV'].shift(-h)
+        rv_lag  = merged['RV']
+        kr      = merged['Key_Rate']
+
+        mask = (rv_fwd.notna() & merged['MPU_pca'].notna() &
+                rv_lag.notna() & kr.notna())
+        y    = rv_fwd[mask].values
+        x1   = merged.loc[mask, 'MPU_pca'].values   # MPU
+        x2   = rv_lag[mask].values                   # RV(t)
+        x3   = kr[mask].values                       # Key_Rate(t)
+
+        if len(y) < 10:
+            continue
+
+        X   = sm.add_constant(np.column_stack([x1, x2, x3]))
+        res = sm.OLS(y, X).fit(cov_type='HAC', cov_kwds={'maxlags': h})
+
+        beta_mpu  = res.params[1]
+        beta_rv   = res.params[2]
+        beta_kr   = res.params[3]
+        pval_mpu  = res.pvalues[1]
+        pval_rv   = res.pvalues[2]
+        pval_kr   = res.pvalues[3]
+        tstat_mpu = res.tvalues[1]
+        r2        = res.rsquared
+
+        records.append({
+            'Горизонт h':       h,
+            'N':                int(mask.sum()),
+            'beta_MPU':         round(beta_mpu,  4),
+            't_MPU':            round(tstat_mpu, 3),
+            'p_MPU':            round(pval_mpu,  4),
+            'beta_RV_lag':      round(beta_rv,   4),
+            'p_RV_lag':         round(pval_rv,   4),
+            'beta_KeyRate':     round(beta_kr,   4),
+            'p_KeyRate':        round(pval_kr,   4),
+            'R2':               round(r2,        4),
+            'MPU значим':       'ДА' if pval_mpu < 0.05 else 'нет',
+        })
+
+        print(f"  h={h}:  "
+              f"beta_MPU={beta_mpu:.4f} (p={pval_mpu:.3f}"
+              f"{'*' if pval_mpu < 0.05 else ''})  "
+              f"beta_RV={beta_rv:.4f} (p={pval_rv:.3f})  "
+              f"beta_KR={beta_kr:.4f} (p={pval_kr:.3f})  "
+              f"R2={r2:.4f}")
+
+    return pd.DataFrame(records)
+
+
+# ============================================================
+# ВИЗУАЛИЗАЦИЯ: Сводный график трёх проверок
+# ============================================================
+
+def plot_robustness_comparison(reg_df: pd.DataFrame,
+                               rob1_df: pd.DataFrame,
+                               rob2_df: pd.DataFrame,
+                               rob3_df: pd.DataFrame) -> None:
+    """
+    Сравнение коэффициентов beta и p-value по четырём спецификациям.
+
+    Спецификации:
+        Базовая:          RV(t+h) = a + b*MPU(t)
+        Без выброса:      то же, но без февраля 2022
+        RV_abs:           RV = mean(|delta_r|) вместо std
+        + контроль KR:    + Key_Rate(t) как регрессор
+
+    Если знак и значимость beta устойчивы ->
+    результат не зависит от конкретной спецификации.
+    """
+    horizons = sorted(reg_df['Горизонт h'].unique())
+    n_h      = len(horizons)
+
+    specs = [
+        (reg_df,  'beta (base)',    'Базовая',          '#1565C0'),
+        (rob1_df, 'beta',           'Без выброса 2022', '#E65100'),
+        (rob2_df, 'beta (RV_abs)',  'RV = mean|delta|', '#27AE60'),
+        (rob3_df, 'beta_MPU',       '+ контроль КС',    '#8E44AD'),
+    ]
+
+    fig, axes = plt.subplots(2, n_h, figsize=(4 * n_h, 9))
+    fig.suptitle('Робастность: beta MPU_pca по спецификациям и горизонтам',
+                 fontsize=13, fontweight='bold')
+
+    for col_i, h in enumerate(horizons):
+        ax_beta = axes[0, col_i]
+        ax_pval = axes[1, col_i]
+
+        betas, pvals, labels, colors = [], [], [], []
+
+        for df, beta_col, label, color in specs:
+            row = df[df['Горизонт h'] == h]
+            if row.empty:
+                continue
+            b = pd.to_numeric(row[beta_col].values[0], errors='coerce')
+            # p-value: ищем нужную колонку
+            p_col = ('p-value (base)' if 'p-value (base)' in df.columns
+                     else 'p-value' if 'p-value' in df.columns
+            else 'p_MPU')
+            p = pd.to_numeric(row[p_col].values[0], errors='coerce')
+            betas.append(b)
+            pvals.append(p)
+            labels.append(label)
+            colors.append(color)
+
+        # Beta
+        bar_colors = ['#27ae60' if p < 0.05 else c
+                      for p, c in zip(pvals, colors)]
+        bars = ax_beta.bar(range(len(betas)), betas,
+                           color=bar_colors, alpha=0.8,
+                           edgecolor='white', width=0.6)
+        ax_beta.axhline(0, color='grey', lw=1)
+        for i, (bar, b) in enumerate(zip(bars, betas)):
+            if not np.isnan(b):
+                ax_beta.text(bar.get_x() + bar.get_width() / 2,
+                             b + 0.002 * np.sign(b) if b != 0 else 0.002,
+                             f'{b:.3f}',
+                             ha='center', va='bottom', fontsize=8)
+        ax_beta.set_xticks(range(len(labels)))
+        ax_beta.set_xticklabels(labels, rotation=20, ha='right', fontsize=8)
+        ax_beta.set_title(f'h = {h}M\nbeta')
+        ax_beta.set_ylabel('beta' if col_i == 0 else '')
+
+        # P-value
+        pval_colors = ['#27ae60' if p < 0.05 else '#c0392b'
+                       for p in pvals]
+        ax_pval.bar(range(len(pvals)), pvals,
+                    color=pval_colors, alpha=0.8,
+                    edgecolor='white', width=0.6)
+        ax_pval.axhline(0.05, color='black', lw=1.5, ls='--',
+                        label='p = 0.05')
+        ax_pval.set_ylim(0, 1)
+        ax_pval.set_xticks(range(len(labels)))
+        ax_pval.set_xticklabels(labels, rotation=20, ha='right', fontsize=8)
+        ax_pval.set_title('p-value')
+        ax_pval.set_ylabel('p-value' if col_i == 0 else '')
+        if col_i == 0:
+            ax_pval.legend(fontsize=8)
+
+    plt.tight_layout()
+    _save(fig, 'robustness_comparison.png')
+
+
+# ============================================================
 # ТОЧКА ВХОДА
 # ============================================================
 
@@ -637,7 +962,7 @@ if __name__ == '__main__':
     # ── 3. Объединение ────────────────────────────────────────
     merged = merge_mpu_rv(mpu_df, rv_df, rv_col='RV_3M')
 
-    # ── 4. Прогнозные регрессии ───────────────────────────────
+    # ── 4. Прогнозные регрессии (базовые) ────────────────────
     HORIZONS = [1, 2, 3, 6]
     reg_df   = forecast_regression(merged, horizons=HORIZONS)
 
@@ -647,31 +972,58 @@ if __name__ == '__main__':
     # ── 6. Тест Грэнджера ─────────────────────────────────────
     granger_df = granger_test(merged, max_lag=4)
 
-    # ── 7. Сохранение таблиц ──────────────────────────────────
+    # ── 7. Робастность ────────────────────────────────────────
+
+    # Проверка 1: без выброса февраля 2022
+    rob1_df = robustness_no_outlier(
+        merged, horizons=HORIZONS, rv_threshold=5.0
+    )
+
+    # Проверка 2: альтернативная мера RV = mean(|delta_r|)
+    rob2_df, merged_alt = robustness_alt_rv(
+        key_rate_df, mpu_df, horizons=HORIZONS, window=3
+    )
+
+    # Проверка 3: контроль на уровень ключевой ставки
+    # Добавляем Key_Rate в merged если ещё нет
+    if 'Key_Rate' not in merged.columns:
+        kr_map = rv_df.set_index('Date')['Key_Rate']
+        merged['Key_Rate'] = merged['Date'].map(kr_map)
+        merged['Key_Rate'] = merged['Key_Rate'].ffill()
+
+    rob3_df = robustness_rate_control(merged, horizons=HORIZONS)
+
+    # ── 8. Сохранение таблиц ──────────────────────────────────
     out_dir = Path('results')
     out_dir.mkdir(exist_ok=True)
 
-    reg_df.to_csv(out_dir / 'forecast_regression.csv', index=False)
-    oos_df.to_csv(out_dir / 'forecast_oos.csv', index=False)
-    granger_df.to_csv(out_dir / 'forecast_granger.csv', index=False)
+    reg_df.to_csv(out_dir / 'forecast_regression.csv',     index=False)
+    oos_df.to_csv(out_dir / 'forecast_oos.csv',            index=False)
+    granger_df.to_csv(out_dir / 'forecast_granger.csv',    index=False)
+    rob1_df.to_csv(out_dir / 'robustness_no_outlier.csv',  index=False)
+    rob2_df.to_csv(out_dir / 'robustness_alt_rv.csv',      index=False)
+    rob3_df.to_csv(out_dir / 'robustness_rate_control.csv',index=False)
     print(f"\nТаблицы сохранены в {out_dir}/")
 
-    # ── 8. Визуализация ───────────────────────────────────────
+    # ── 9. Визуализация ───────────────────────────────────────
     print("\nГенерация графиков...")
 
-    print("[1/5] MPU vs RV (временной ряд)...")
+    print("[1/6] MPU vs RV (временной ряд)...")
     plot_mpu_vs_rv(merged)
 
-    print("[2/5] Scatter MPU(t) vs RV(t+h)...")
+    print("[2/6] Scatter MPU(t) vs RV(t+h)...")
     plot_scatter_mpu_rv(merged, horizons=HORIZONS)
 
-    print("[3/5] Сводный график (beta + R2_oos)...")
+    print("[3/6] Сводный график (beta + R2_oos)...")
     plot_forecast_summary(reg_df, oos_df)
 
-    print("[4/5] OOS прогноз (h=3)...")
+    print("[4/6] OOS прогноз (h=3)...")
     plot_oos_predictions(merged, horizon=3, split_frac=0.6)
 
-    print("[5/5] Кросс-корреляция...")
+    print("[5/6] Кросс-корреляция...")
     plot_cross_correlogram(merged, max_lag=8)
+
+    print("[6/6] Сравнение робастности по спецификациям...")
+    plot_robustness_comparison(reg_df, rob1_df, rob2_df, rob3_df)
 
     print(f"\nГотово. Графики: {PLOT_DIR.resolve()}")
