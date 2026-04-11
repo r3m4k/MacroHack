@@ -178,8 +178,8 @@ if __name__ == "__main__":
     print('Данные о ключевой ставке и инфляции')
     print(get_key_rate_dataframe())
 
-    # print('Данные индекса выпуска товаров и услуг')
-    # print(get_ivbo_dataframe())
-    #
-    # print('Квартальные данные валовой добавленной стоимости')
-    # print(get_gva_monthly_dataframe())
+    print('Данные индекса выпуска товаров и услуг')
+    print(get_ivbo_dataframe())
+
+    print('Квартальные данные валовой добавленной стоимости')
+    print(get_gva_monthly_dataframe())
