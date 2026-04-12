@@ -24,14 +24,16 @@ from mpu_rwd       import build_mpu_rwd
 from mpu_iv_surface import build_mpu_iv_surface
 from mpu_rv        import build_mpu_rv
 from mpu_evaluator import MPUEvaluator
-from mpu_tests     import run_all_tests
+from mpu_tests          import run_all_tests
+from inflation_forecast import run_inflation_tests
 
 RESULT_DIR  = Path('results')
 MATURITIES  = ['1M', '3M', '6M', '1Y']
 MAIN_MAT    = '3M'       # основной срок для MPU_ext и RWD
 SPLIT_FRAC  = 0.6        # доля in-sample для OOS теста
 HORIZONS    = [1, 2, 3, 6, 12]   # добавлен h=12M
-TEST_INDICES = ['MPU_decay', 'MPU_ext', 'MPU_atm', 'MPU_rv_std']
+TEST_INDICES    = ['MPU_decay', 'MPU_ext', 'MPU_atm', 'MPU_rv_std']
+INFLAT_INDICES  = ['MPU_rv_std', 'MPU_decay', 'MPU_atm']
 
 
 # ============================================================
@@ -233,6 +235,16 @@ if __name__ == '__main__':
         key_rate_df    = key_rate_df,
         horizons_all   = [1, 2, 3, 6, 12],
         save           = True,
+    )
+
+    # 6. Тест прогнозирования инфляции
+    inflat_subset = {k: v for k, v in indices.items()
+                     if k in INFLAT_INDICES}
+
+    run_inflation_tests(
+        indices     = inflat_subset,
+        key_rate_df = key_rate_df,
+        save        = True,
     )
 
     print(f"\nВсе результаты сохранены в: {RESULT_DIR.resolve()}")

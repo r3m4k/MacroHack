@@ -1,0 +1,6 @@
+name,h,N_is,N_oos,beta,pval,R2_oos,beats_bench
+MPU_atm,1,42,28,0.3283,0.1473,-0.9944,False
+MPU_atm,2,42,27,0.051,0.836,-0.1116,False
+MPU_atm,3,42,26,-0.1585,0.5682,0.271,True
+MPU_atm,6,42,23,-0.5781,0.1347,0.491,True
+MPU_atm,12,42,17,-0.4866,0.1332,0.3996,True
