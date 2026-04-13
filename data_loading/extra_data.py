@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 
 _KEY_RATE_FILE = Path(__file__).parent.parent / 'MacroHack_data' / 'ExtraData' / 'Инфляция и ключевая ставка Банка России_F20_09_2013_T07_04_2026.xlsx'
+_REER_FILE = Path(__file__).parent.parent / 'MacroHack_data'/ 'ExtraData' / 'exchange_rate.xlsx'
 
 # ----------------------------------------------------------------------------
 
@@ -65,7 +66,11 @@ def get_key_rate_dataframe() -> pd.DataFrame:
 # ----------------------------------------------------------------------------
 
 def get_ivbo_dataframe() -> pd.DataFrame:
-    """ Загрузка данных индекса выпуска товаров и услуг (IVBO) """
+    """
+    Загрузка данных индекса выпуска товаров и услуг (IVBO)
+    по данным из файла MacroHack_data/ExtraData/IVBO_OKVED2_02-2026.xlsx.
+    Зададим вручную значения, тк структура таблицы сложна для автоматизации
+    """
 
     data = {
         'Period': ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'],
@@ -81,7 +86,8 @@ def get_ivbo_dataframe() -> pd.DataFrame:
         2022: [72.1, 99.5, 113.0, 92.3, 97.9, 104.4, 104.9, 104.0, 105.1, 101.4, 98.0, 111.6],
         2023: [72.5, 100.1, 115.9, 96.8, 101.2, 104.3, 104.6, 103.9, 106.0, 100.4, 95.3, 111.9],
         2024: [72.9, 103.4, 111.0, 97.8, 102.1, 100.9, 105.2, 101.3, 107.0, 101.8, 95.0, 116.8],
-        2025: [68.5, 101.3, 111.6, 99.1, 100.6, 102.1, 104.5, 101.3, 107.6, 102.8, 93.1, 121.2]
+        2025: [68.5, 101.3, 111.6, 99.1, 100.6, 102.1, 104.5, 101.3, 107.6, 102.8, 93.1, 121.2],
+        2026: [63.7, None, None, None, None, None, None, None, None, None, None, None]
     }
 
     df_wide = pd.DataFrame(data)
@@ -174,12 +180,69 @@ def get_gva_monthly_dataframe() -> pd.DataFrame:
 
 # ----------------------------------------------------------------------------
 
+def get_reer_dataframe() -> pd.DataFrame:
+    """
+    Загрузка данных индекса реального эффективного курса рубля (REER)
+    Возвращает DataFrame с колонками Date (первый день месяца) и REER
+    """
+
+    # Читаем файл без заголовков, чтобы получить сырые строки
+    df_raw = pd.read_excel(_REER_FILE, header=None)
+
+    # Предполагаем, что первые три строки – это годы, месяцы и значения
+    # Берём все столбцы (если есть пустые в начале, их нужно пропустить)
+    years_row = df_raw.iloc[1, 157:].dropna()
+    months_row = df_raw.iloc[2, 157:].dropna()
+    values_row = df_raw.iloc[21, 157:].dropna()
+
+    # Убеждаемся, что количество столбцов одинаково
+    min_len = min(len(years_row), len(months_row), len(values_row))
+    years = years_row.iloc[:min_len].astype(int)
+    months = months_row.iloc[:min_len].astype(str)
+    values = values_row.iloc[:min_len]
+
+    # Сопоставление русских названий месяцев с номерами
+    month_map = {
+        'Янв': 1, 'Фев': 2, 'Мар': 3, 'Апр': 4, 'Май': 5, 'Июн': 6,
+        'Июл': 7, 'Авг': 8, 'Сен': 9, 'Окт': 10, 'Ноя': 11, 'Дек': 12
+    }
+
+    dates = []
+    reer_vals = []
+
+    for y, m, v in zip(years, months, values):
+        # Пропускаем, если год или месяц не определены
+        if pd.isna(y) or pd.isna(m):
+            continue
+        month_num = month_map.get(m.strip())
+        if month_num is None:
+            continue
+        dates.append(pd.Timestamp(year=int(y), month=month_num, day=1))
+
+        # Преобразование значения: замена запятой на точку и приведение к float
+        if isinstance(v, str):
+            v = v.replace(',', '.')
+        try:
+            reer_vals.append(float(v))
+        except (ValueError, TypeError):
+            reer_vals.append(np.nan)
+
+    # Создаём итоговый DataFrame и удаляем строки с NaN
+    df_result = pd.DataFrame({'Date': dates, 'REER': reer_vals}).dropna(subset=['REER'])
+    df_result = df_result.sort_values('Date').reset_index(drop=True)
+    return df_result
+
+# ----------------------------------------------------------------------------
+
 if __name__ == "__main__":
-    print('Данные о ключевой ставке и инфляции')
-    print(get_key_rate_dataframe())
+    # print('Данные о ключевой ставке и инфляции')
+    # print(get_key_rate_dataframe())
 
-    print('Данные индекса выпуска товаров и услуг')
-    print(get_ivbo_dataframe())
+    # print('Данные индекса выпуска товаров и услуг')
+    # print(get_ivbo_dataframe())
 
-    print('Квартальные данные валовой добавленной стоимости')
-    print(get_gva_monthly_dataframe())
+    # print('Квартальные данные валовой добавленной стоимости')
+    # print(get_gva_monthly_dataframe())
+
+    print('Данных индекса реального эффективного курса рубля (REER)')
+    print(get_reer_dataframe())
