@@ -1,0 +1,6 @@
+h,R2_oos_MPU_pca,beats_MPU_pca,R2_oos_MPU_decay,beats_MPU_decay,R2_oos_MPU_ext,beats_MPU_ext,R2_oos_MPU_rwd,beats_MPU_rwd,R2_oos_MPU_vrp,beats_MPU_vrp,R2_oos_MPU_atm,beats_MPU_atm,R2_oos_MPU_rr,beats_MPU_rr,R2_oos_MPU_bf,beats_MPU_bf,R2_oos_MPU_rv_std,beats_MPU_rv_std,R2_oos_MPU_rv_har,beats_MPU_rv_har,best
+1,-2.3666,False,-1.7819,False,-6.6982,False,-2.9926,False,-0.1097,False,-0.9944,False,0.027,True,0.0768,True,0.7584,True,0.4958,True,MPU_rv_std
+2,0.2242,True,0.1506,True,-0.7228,False,0.2021,True,-4.0081,False,-0.1116,False,-3.876,False,-0.808,False,0.4909,True,0.2654,True,MPU_rv_std
+3,0.2528,True,0.3277,True,-0.1547,False,0.1774,True,-3.5708,False,0.271,True,-5.5387,False,-1.1262,False,0.1968,True,0.0994,True,MPU_decay
+6,0.1365,True,0.3645,True,0.4729,True,0.1012,True,-7.0527,False,0.491,True,-7.801,False,-1.9664,False,-0.1444,False,0.0077,True,MPU_atm
+12,0.3987,True,0.3174,True,0.1602,True,0.3791,True,0.2103,True,0.3996,True,0.4417,True,0.3584,True,-0.2931,False,-0.1723,False,MPU_rr

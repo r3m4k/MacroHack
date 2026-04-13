@@ -35,7 +35,7 @@ $$q(S_T) = m(S_T) \cdot p(S_T)$$
 
 Для европейского колл-опциона на актив $S$ со страйком $K$ и погашением $T$:
 
-$$\boxed{q(K) = e^{rT} \frac{\partial^2 C(K, T)}{\partial K^2}}$$
+$${q(K) = e^{rT} \frac{\partial^2 C(K, T)}{\partial K^2}}$$
 
 **Вывод:**
 

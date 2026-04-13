@@ -1,0 +1,6 @@
+name,h,N_is,N_oos,beta,pval,R2_oos,beats_bench
+MPU_rv_std,1,42,28,1.0705,0.0,0.7138,True
+MPU_rv_std,2,42,27,0.7134,0.0003,0.4371,True
+MPU_rv_std,3,42,26,0.2992,0.0024,0.1678,True
+MPU_rv_std,6,42,23,-0.2021,0.0765,-0.078,False
+MPU_rv_std,12,42,17,-0.1956,0.103,-0.2284,False

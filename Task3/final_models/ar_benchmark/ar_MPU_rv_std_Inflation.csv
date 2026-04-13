@@ -1,0 +1,6 @@
+mpu,target,h,N_is,N_oos,R2_const,R2_ar,R2_mpu,R2_arx,gain_vs_ar,beta_mpu,pval_mpu,beta_arx_mpu,pval_arx_mpu,mpu_beats_const,mpu_beats_ar
+MPU_rv_std,Inflation,1,42,28,0.0,0.8894,-1.1635,0.7032,-0.1863,2.5402,0.0,0.7475,0.0,False,False
+MPU_rv_std,Inflation,2,42,27,0.0,0.6617,-1.0924,0.3558,-0.3059,2.4572,0.0,0.5681,0.0,False,False
+MPU_rv_std,Inflation,3,42,26,0.0,0.416,-0.8661,0.1065,-0.3095,2.2354,0.0,0.4183,0.0052,False,False
+MPU_rv_std,Inflation,6,42,23,0.0,-0.0933,-0.1388,-0.0961,-0.0028,1.4484,0.0,0.0545,0.7987,False,False
+MPU_rv_std,Inflation,12,42,17,0.0,0.3896,-0.2111,0.3167,-0.0729,-1.0762,0.017,-0.3559,0.025,False,False

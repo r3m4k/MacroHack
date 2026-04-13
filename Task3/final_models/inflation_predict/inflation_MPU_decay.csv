@@ -1,0 +1,6 @@
+name,h,N_is,N_oos,beta,pval,R2_oos,beats_bench
+MPU_decay,1,39,25,2.4674,0.0048,0.1096,True
+MPU_decay,2,39,24,1.5694,0.0447,0.6378,True
+MPU_decay,3,39,23,1.0061,0.2118,0.61,True
+MPU_decay,6,39,20,-1.0813,0.3551,-1.6828,False
+MPU_decay,12,39,14,-0.2756,0.6675,0.1021,True
